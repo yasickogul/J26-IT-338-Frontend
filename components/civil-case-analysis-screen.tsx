@@ -38,7 +38,7 @@ export function CivilCaseAnalysisScreen({ onOpenJudgment }: { onOpenJudgment?: (
         title="Civil Case Analysis"
         description="Prepare a civil dispute for comparison with relevant historical Sri Lankan judgments, similar facts, and evidence. This prototype does not predict a case outcome."
         action={
-          <Link className="button primary" href="/civil-case-analysis/new">
+          <Link className="button primary" href="/lawyer/civil-case-analysis/new">
             <Plus size={16} /> Analyze new case
           </Link>
         }
@@ -101,7 +101,7 @@ export function CivilCaseAnalysisScreen({ onOpenJudgment }: { onOpenJudgment?: (
             relevant historical cases.
           </p>
         </div>
-        <Link className="button secondary" href="/civil-case-analysis/new">
+        <Link className="button secondary" href="/lawyer/civil-case-analysis/new">
           Begin guided flow <ArrowRight size={15} />
         </Link>
       </div>

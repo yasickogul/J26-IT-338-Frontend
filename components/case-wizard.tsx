@@ -101,7 +101,7 @@ export function CaseWizard() {
   const leave = useCallback(
     (force = false) => {
       if (!force && draftHasUnsavedContent(draft) && !confirmDiscard()) return
-      router.push('/civil-case-analysis')
+      router.push('/lawyer/civil-case-analysis')
     },
     [draft, router],
   )
@@ -169,7 +169,7 @@ export function CaseWizard() {
     console.info('C2 intake payload (prototype — not sent)', payload)
     sessionStorage.setItem(SIMULATED_SUBMIT_FLAG, '1')
     clearCaseDraft()
-    router.push('/civil-case-analysis')
+    router.push('/lawyer/civil-case-analysis')
   }
 
   if (!hydrated) {

@@ -36,7 +36,7 @@ export function OverviewScreen({ onOpenJudgment }: { onOpenJudgment?: (title: st
             title: 'Civil Case Analysis',
             desc: 'Find relevant historical cases and compare similar facts, evidence, and legal precedent relevance.',
             Icon: Scale,
-            href: '/civil-case-analysis',
+            href: '/lawyer/civil-case-analysis',
             badge: 'Precedent research',
           },
         ]
