@@ -35,7 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
     roles: ['lawyer'],
   },
   {
-    label: 'Multi-Agent Deliberation & Settlement Simulator',
+    label: 'Multi-Agent Legal Argumentation Engine',
     href: '/settlement-simulator',
     icon: CircleHelp,
     roles: ['people'],
@@ -62,7 +62,7 @@ export function crumbLabelForPath(pathname: string): string {
   if (pathname.startsWith('/legal-document-analysis/new')) return 'New document analysis'
   if (pathname.startsWith('/legal-document-analysis')) return 'Legal Document Analysis'
   if (pathname.startsWith('/settlement-simulator')) {
-    return 'Multi-Agent Deliberation & Settlement Simulator'
+    return 'Multi-Agent Legal Argumentation Engine'
   }
   if (pathname.startsWith('/legal-misinformation')) return 'Legal Misinformation Analysis'
   if (pathname.startsWith('/analysis-history')) return 'Analysis History'
