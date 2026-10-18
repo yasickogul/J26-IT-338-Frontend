@@ -70,6 +70,16 @@ npm run build
 npm start
 ```
 
+### End-to-end tests (Playwright)
+
+See **`TESTING.md`** for headed/UI mode, reports, and what is mocked.
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
 ---
 
 ## Backend (Python) — use uv
