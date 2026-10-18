@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Activity, ArrowRight, ChevronRight, Filter, Info, Library, Plus, Scale, Sparkles, Zap } from 'lucide-react'
-import { SIMULATED_SUBMIT_FLAG } from '@/lib/case-draft'
+import { loadStoredC1Result, type C1ExtractedLegalInfo } from '@/lib/c1-api'
+import { lawyerPaths } from '@/lib/nav'
 import { Badge, caseData, MiniChart, SectionTitle, Stat } from './shared-ui'
 
 const recent = [
@@ -14,22 +15,25 @@ const recent = [
 ] as const
 
 export function CivilCaseAnalysisScreen({ onOpenJudgment }: { onOpenJudgment?: (title: string) => void }) {
-  const [showPrototypeNotice, setShowPrototypeNotice] = useState(false)
+  const [lastResult, setLastResult] = useState<C1ExtractedLegalInfo | null>(null)
 
   useEffect(() => {
-    if (sessionStorage.getItem(SIMULATED_SUBMIT_FLAG) !== '1') return
-    sessionStorage.removeItem(SIMULATED_SUBMIT_FLAG)
-    setShowPrototypeNotice(true)
+    setLastResult(loadStoredC1Result())
   }, [])
 
   return (
     <>
-      {showPrototypeNotice && (
+      {lastResult && (
         <div className="notice" role="status">
           <Info size={17} />
           <span>
-            <b>Prototype only.</b> Nothing was sent to a server. No relevant historical cases were retrieved, and no
-            legal relevance score was calculated.
+            <b>Latest C1 intake saved.</b> Structured extraction is available for{' '}
+            {lastResult.case_information.title || 'your submitted case'}. Similar historical judgments were not
+            retrieved.
+            {' '}
+            <Link className="text-button" href={lawyerPaths.intakeResult(lastResult.intake_id)}>
+              Open intake result <ArrowRight size={14} />
+            </Link>
           </span>
         </div>
       )}

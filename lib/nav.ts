@@ -25,6 +25,7 @@ export const lawyerPaths = {
   overview: '/lawyer/overview',
   civilCaseAnalysis: '/lawyer/civil-case-analysis',
   newCivilCaseAnalysis: '/lawyer/civil-case-analysis/new',
+  intakeResult: (intakeId: string) => `/lawyer/civil-case-analysis/${encodeURIComponent(intakeId)}`,
   settings: '/lawyer/settings',
 } as const
 
@@ -79,6 +80,7 @@ function withoutLawyerPrefix(pathname: string): string {
 export function crumbLabelForPath(pathname: string): string {
   const path = withoutLawyerPrefix(pathname)
   if (path.startsWith('/civil-case-analysis/new')) return 'New case analysis'
+  if (/^\/civil-case-analysis\/[^/]+$/.test(path)) return 'Case intake result'
   if (path.startsWith('/civil-case-analysis')) return 'Civil Case Analysis'
   if (path.startsWith('/legal-document-analysis/new')) return 'New document analysis'
   if (path.startsWith('/legal-document-analysis')) return 'Legal Document Analysis'
@@ -114,6 +116,8 @@ function isLawyerSection(pathname: string): boolean {
 
 export function canAccessPath(role: UserRole, pathname: string): boolean {
   if (pathname === '/lawyer' || pathname.startsWith('/lawyer/')) {
+    // Block reserved static segment collisions are handled by the App Router;
+    // any /lawyer/civil-case-analysis/* path is lawyer-only Stage 2 UI.
     return role === 'lawyer' && isLawyerSection(pathname)
   }
   if (pathname.startsWith('/civil-case-analysis')) return role === 'lawyer'
