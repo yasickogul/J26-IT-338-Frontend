@@ -529,7 +529,7 @@ export function AnalysisHistoryScreen() {
         {[
           ['Perera v. Silva', 'Civil Case Analysis'],
           ['Employment Agreement', 'Document Analysis'],
-          ['Rent increase without notice', 'Settlement Simulator'],
+          ['Rent increase without notice', 'Multi-Agent Legal Argumentation Engine'],
           ['Overtime claim check', 'Misinformation Analysis'],
         ].map(([title, type]) => (
           <div className="history-row" key={title}>
