@@ -47,8 +47,8 @@ export function SettlementSimulator() {
   const toggleWhatIf = (index: number) => {
     const next = selected.includes(index) ? selected.filter((item) => item !== index) : [...selected, index]
     setSelected(next)
-    setPlaintiff(Math.max(0, Math.min(100, 64 + next.reduce((sum, item) => sum + whatIfs[item][1], 0))))
-    setDefense(Math.max(0, Math.min(100, 51 + next.reduce((sum, item) => sum + whatIfs[item][2], 0))))
+    setPlaintiff(Math.max(0, Math.min(100, 64 + next.reduce((sum, item) => sum + Number(whatIfs[item][1]), 0))))
+    setDefense(Math.max(0, Math.min(100, 51 + next.reduce((sum, item) => sum + Number(whatIfs[item][2]), 0))))
     setScenario('Custom scenario')
   }
   const zone = useMemo(() => `${Math.max(0, Math.min(plaintiff, defense) + 8)}%–${Math.min(100, Math.max(plaintiff, defense) - 4)}%`, [plaintiff, defense])
