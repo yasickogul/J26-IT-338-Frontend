@@ -264,7 +264,7 @@ export function MisinformationScreen() {
       <SectionTitle
         eyebrow="SOURCE VERIFICATION"
         title="Legal Misinformation Analysis"
-        description="Compare a legal claim, image, document, or reference with simulated Sri Lankan civil-law evidence."
+        description="Compare a legal claim or image with simulated Sri Lankan civil-law evidence."
         action={
           <button type="button" className="button secondary" onClick={() => setDone(false)}>
             Analysis history
@@ -287,7 +287,7 @@ export function MisinformationScreen() {
           <Badge tone="gold">Client-side simulation</Badge>
         </div>
         <div className="mis-tabs">
-          {['Text Claim', 'Upload Image', 'Upload Document', 'Reference / URL'].map((x) => (
+          {['Text Claim', 'Upload Image'].map((x) => (
             <button key={x} type="button" className={tab === x ? 'mis-tab active' : 'mis-tab'} onClick={() => setTab(x)}>
               {x}
             </button>
@@ -301,15 +301,14 @@ export function MisinformationScreen() {
             placeholder="An employer can deduct any amount from an employee's salary without written consent."
           />
         )}
-        {tab === 'Reference / URL' && <input className="mis-url" placeholder="Paste a webpage or reference URL" />}
-        {(tab === 'Upload Image' || tab === 'Upload Document') && (
+        {tab === 'Upload Image' && (
           <label className="mis-dropzone">
             <Upload size={25} />
-            <b>Drop your {tab === 'Upload Image' ? 'image' : 'document'} here, or browse files</b>
-            <span>PNG, JPG, JPEG, WEBP, PDF · prototype limit 25 MB</span>
+            <b>Drop your image here, or browse files</b>
+            <span>PNG, JPG, JPEG, WEBP · prototype limit 25 MB</span>
             <input
               type="file"
-              accept={tab === 'Upload Image' ? 'image/png,image/jpeg,image/webp' : 'application/pdf,.docx'}
+              accept="image/png,image/jpeg,image/webp"
               onChange={pick}
             />
           </label>
