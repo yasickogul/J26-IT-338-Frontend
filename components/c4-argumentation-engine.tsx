@@ -6,7 +6,50 @@ import { Check, FileText, Info, Network, Play, Scale, ShieldCheck, Upload, X } f
 type Mode = 'demo' | 'live'
 type Tab = 'debate' | 'graph' | 'assessment'
 type Stage = 'submitted' | 'retrieval' | 'plaintiff' | 'defense' | 'rebuttal' | 'verification' | 'audit' | 'complete'
-type EvidenceFile = { id: string; name: string; size: number; type: string; status: 'ready' | 'invalid' }
+type ExtractedDocument = {
+  document_id: string
+  sanitized_filename: string
+  file_type: 'pdf' | 'docx'
+  file_size: number
+  extraction_status: 'extracted' | 'ocr_required' | 'failed'
+  page_count: number | null
+  sections: Array<{ label: string; text: string }>
+  extracted_text: string
+  character_count: number
+  warnings: string[]
+  ocr_required: boolean
+  content_status: 'unverified_extracted_text'
+}
+type EvidenceFile = {
+  id: string
+  name: string
+  size: number
+  type: string
+  status: 'uploading' | 'extracted' | 'ocr_required' | 'failed'
+  warning?: string
+  document?: ExtractedDocument
+}
+type AssessmentResponse = {
+  case_summary: string
+  stated_facts: string
+  evidence_sufficiency: 'sufficient' | 'limited' | 'insufficient'
+  strengths: string[]
+  weaknesses: string[]
+  missing_evidence: string[]
+  unsupported_claim_warnings: string[]
+  disclaimer: string
+  verified_court_case_references: Array<{ source_id: string; case_number: string; start_page: number | null; end_page: number | null; similarity_score: number | null }>
+  plaintiff_arguments: { arguments: Array<{ claim: string; evidence_source_ids: string[]; missing_evidence: string[] }>; limitations: string[] }
+  defense_counterarguments: { counterarguments: Array<{ challenged_claim: string; counterargument: string; evidence_source_ids: string[]; missing_evidence: string[] }>; limitations: string[] }
+  neutral_case_assessment: { assessment: string; strengths: string[]; weaknesses: string[]; missing_evidence: string[]; unsupported_claim_warnings: string[]; evidence_sufficiency: string }
+  citation_audits: Record<string, { valid_source_ids: string[]; invalid_source_ids: string[]; invalid_case_numbers: string[] }>
+  execution_errors: string[]
+  uploaded_document_references?: Array<{ source_id: string; document_id: string; sanitized_filename: string; section_label: string; section_text: string; extraction_status: 'extracted' | 'ocr_required'; warning?: string | null }>
+  document_context_warnings?: string[]
+}
+
+const c4ApiBase = process.env.NEXT_PUBLIC_C4_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const c4DocumentEndpoint = `${c4ApiBase.replace(/\/$/, '')}/api/v1/c_argumentation/documents/extract`
 
 const disputeTypes = [
   'Rental Agreement Dispute',
@@ -55,15 +98,16 @@ export function C4ArgumentationEngine() {
   const [running, setRunning] = useState(false)
   const [visibleMessages, setVisibleMessages] = useState(0)
   const [error, setError] = useState('')
+  const [assessment, setAssessment] = useState<AssessmentResponse | null>(null)
 
   const completedStage = stages.findIndex(([value]) => value === stage)
   const visible = demoMessages.slice(0, visibleMessages)
-  const validEvidence = evidence.filter(file => file.status === 'ready')
+  const validEvidence = evidence.filter(file => (file.status === 'extracted' || file.status === 'ocr_required') && file.document)
   const caseValid = title.trim().length >= 4 && facts.trim().length >= 40 && userPosition.trim().length >= 10
 
   const processStage = (next: Stage) => setStage(next)
 
-  const runDemo = () => {
+  const runAnalysis = async () => {
     if (!caseValid) {
       setError('Add a case title, at least 40 characters of facts, and your position before starting.')
       return
@@ -71,10 +115,25 @@ export function C4ArgumentationEngine() {
     setError('')
     setRunning(true)
     setVisibleMessages(0)
+    setAssessment(null)
     processStage('retrieval')
     if (mode === 'live') {
-      setError('Live API integration is ready for connection, but no C4 backend endpoint is configured yet.')
-      setRunning(false)
+      try {
+        const response = await fetch(`${c4ApiBase.replace(/\/$/, '')}/api/v1/c_argumentation/assess`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_title: title, dispute_type: disputeType, case_facts: facts, user_position: userPosition, opposing_position: opposingPosition || null, documents: validEvidence.flatMap(file => file.document ? [{ ...file.document, sections: file.document.sections.map(section => ({ label: section.label, text: '' })) }] : []) }),
+        })
+        if (!response.ok) throw new Error(`C4 backend returned HTTP ${response.status}`)
+        const data = await response.json() as AssessmentResponse
+        setAssessment(data)
+        setStage('complete')
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to connect to the C4 backend.')
+        setStage('submitted')
+      } finally {
+        setRunning(false)
+      }
       return
     }
     processStage('plaintiff')
@@ -90,16 +149,40 @@ export function C4ArgumentationEngine() {
     })
   }
 
+  const uploadDocument = async (file: File, id: string) => {
+    const formData = new FormData()
+    formData.append('document', file)
+    try {
+      const response = await fetch(c4DocumentEndpoint, { method: 'POST', body: formData })
+      const data = await response.json().catch(() => null) as ExtractedDocument & { detail?: string } | null
+      if (!response.ok) throw new Error(data?.detail || `Document extraction failed (HTTP ${response.status})`)
+      if (!data || !data.document_id || (data.extraction_status !== 'extracted' && data.extraction_status !== 'ocr_required')) throw new Error('Document extraction returned an invalid result.')
+      const status = data?.extraction_status === 'ocr_required' ? 'ocr_required' : 'extracted'
+      setEvidence(current => current.map(item => item.id === id ? { ...item, status, warning: data?.warnings?.join(' '), document: data ?? undefined } : item))
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : 'Document extraction failed.'
+      setEvidence(current => current.map(item => item.id === id ? { ...item, status: 'failed', warning: message } : item))
+    }
+  }
+
   const addFiles = (files: FileList | File[]) => {
-    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png']
+    const allowedExtensions = ['.pdf', '.docx']
     const next = Array.from(files).map(file => ({
-      id: `${file.name}-${file.lastModified}`,
+      id: `${file.name}-${file.lastModified}-${file.size}`,
       name: file.name,
       size: file.size,
       type: file.type,
-      status: allowed.includes(file.type) && file.size <= 10 * 1024 * 1024 ? 'ready' as const : 'invalid' as const,
+      status: 'uploading' as const,
     }))
     setEvidence(current => [...current.filter(file => !next.some(item => item.id === file.id)), ...next])
+    next.forEach((item, index) => {
+      const file = Array.from(files)[index]
+      if (!allowedExtensions.some(extension => file.name.toLowerCase().endsWith(extension)) || file.size === 0 || file.size > 10 * 1024 * 1024) {
+        setEvidence(current => current.map(existing => existing.id === item.id ? { ...existing, status: 'failed', warning: 'Only non-empty PDF or DOCX files up to 10 MB are accepted.' } : existing))
+        return
+      }
+      void uploadDocument(file, item.id)
+    })
   }
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -140,9 +223,10 @@ export function C4ArgumentationEngine() {
           <label>Case Facts<textarea value={facts} onChange={event => setFacts(event.target.value)} rows={6} placeholder="Describe what happened chronologically, who was involved, and what evidence is available." /><small>{facts.length} characters · Include dates, people, claims, and available documents.</small></label>
           <label>Your Position<textarea value={userPosition} onChange={event => setUserPosition(event.target.value)} rows={3} placeholder="What is your position in this dispute?" /></label>
           <label>Opposing Party's Position <em>optional</em><textarea value={opposingPosition} onChange={event => setOpposingPosition(event.target.value)} rows={3} placeholder="What does the opposing party claim?" /></label>
-          <label className="c4x-upload" onDragOver={event => event.preventDefault()} onDrop={onDrop}><Upload size={18} /><span>Drop supporting evidence here or <b>browse files</b></span><small>PDF, DOCX, JPG, PNG · maximum 10 MB per file</small><input type="file" multiple accept=".pdf,.docx,.jpg,.jpeg,.png" onChange={onFileChange} /></label>
-          {evidence.length > 0 && <div className="c4x-files">{evidence.map(file => <div className={file.status === 'invalid' ? 'invalid' : ''} key={file.id}><FileText size={15} /><span>{file.name}<small>{formatBytes(file.size)} · {file.status === 'ready' ? 'Ready for analysis' : 'Unsupported file or size'}</small></span><button aria-label={`Remove ${file.name}`} onClick={() => setEvidence(current => current.filter(item => item.id !== file.id))}><X size={14} /></button></div>)}</div>}
-          <div className="c4x-actions"><button className="c4x-primary" onClick={runDemo} disabled={running || !caseValid}><Play size={15} /> {running ? 'Analysis in progress' : 'Start Multi-Agent Analysis'}</button>{mode === 'demo' && <button className="c4x-secondary" onClick={() => { setVisibleMessages(demoMessages.length); setStage('complete'); setRunning(false) }}>Skip Ahead</button>}</div>
+          <label className="c4x-upload" onDragOver={event => event.preventDefault()} onDrop={onDrop}><Upload size={18} /><span>Drop supporting evidence here or <b>browse files</b></span><small>PDF, DOCX · maximum 10 MB per file</small><input type="file" multiple accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={onFileChange} /></label>
+          {evidence.length > 0 && <div className="c4x-files">{evidence.map(file => <div className={file.status === 'failed' ? 'invalid' : ''} key={file.id}><FileText size={15} /><span>{file.name}<small>{formatBytes(file.size)} · {file.status === 'uploading' ? 'Uploading and extracting…' : file.status === 'extracted' ? 'Text extracted' : file.status === 'ocr_required' ? 'Text extracted; OCR required' : file.warning || 'Extraction failed'}</small>{file.warning && file.status !== 'failed' && <small>{file.warning}</small>}</span><button aria-label={`Remove ${file.name}`} onClick={() => setEvidence(current => current.filter(item => item.id !== file.id))}><X size={14} /></button></div>)}</div>}
+          {validEvidence.length > 0 && <p className="c4x-upload-note">{validEvidence.length} extracted document{validEvidence.length === 1 ? '' : 's'} will be included as unverified D-source evidence.</p>}
+          <div className="c4x-actions"><button className="c4x-primary" onClick={runAnalysis} disabled={running || !caseValid}><Play size={15} /> {running ? 'Analysis in progress' : 'Start Multi-Agent Analysis'}</button>{mode === 'demo' && <button className="c4x-secondary" onClick={() => { setVisibleMessages(demoMessages.length); setStage('complete'); setRunning(false) }}>Skip Ahead</button>}</div>
           {error && <p className="c4x-error" role="alert"><Info size={15} />{error}</p>}
           <p className="c4x-disclaimer"><ShieldCheck size={14} /> Informational research interface only. It does not provide legal advice or predict a court result.</p>
         </section>
@@ -152,10 +236,10 @@ export function C4ArgumentationEngine() {
             {([['debate', 'Debate', FileText], ['graph', 'Argument Graph', Network], ['assessment', 'Neutral Case Assessment', ShieldCheck]] as const).map(([value, label, Icon]) => <button role="tab" aria-selected={tab === value} className={tab === value ? 'active' : ''} key={value} onClick={() => setTab(value)}><Icon size={15} />{label}</button>)}
           </div>
           <div className="c4x-result-body">
-            <div className="c4x-status"><span className={running ? 'pulse' : 'dot'} />{running ? `Processing · ${workflowLabel}` : stage === 'complete' ? 'Assessment complete · Demo data' : 'Ready for analysis'}</div>
+            <div className="c4x-status"><span className={running ? 'pulse' : 'dot'} />{running ? `Processing · ${workflowLabel}` : stage === 'complete' ? (mode === 'live' ? 'Assessment complete · Live C4 data' : 'Assessment complete · Demo data') : 'Ready for analysis'}</div>
             {tab === 'debate' && <DebateView messages={visible} />}
             {tab === 'graph' && <GraphView hasData={visible.length > 0} />}
-            {tab === 'assessment' && <AssessmentView complete={stage === 'complete'} title={title} disputeType={disputeType} evidenceCount={validEvidence.length} />}
+            {tab === 'assessment' && <AssessmentView complete={stage === 'complete'} title={title} disputeType={disputeType} evidenceCount={validEvidence.length} assessment={assessment} />}
           </div>
           <footer className="c4x-footer"><span>{mode === 'demo' ? 'Demo mode · illustrative data' : 'Live mode · backend connection required'}</span><button onClick={() => { setVisibleMessages(0); setStage('submitted'); setRunning(false) }}>Reset</button></footer>
         </section>
@@ -175,9 +259,28 @@ function GraphView({ hasData }: { hasData: boolean }) {
   return <div className="c4x-graph"><div className="c4x-graph-toolbar"><span>Demo graph · select a node for details</span><button onClick={() => setSelected('Issue')}>Reset view</button></div><svg viewBox="0 0 640 300" role="img" aria-label="Interactive argument graph">{nodes.slice(1).map(node => <line key={node[0]} x1={nodes[0][2]} y1={nodes[0][3]} x2={node[2]} y2={node[3]} className="c4x-edge" />)}{nodes.map(node => <g key={node[0]} onClick={() => setSelected(node[0])} className={selected === node[0] ? 'selected' : ''}><rect x={node[2] - 70} y={node[3] - 25} width="140" height="50" rx="10" /><text x={node[2]} y={node[3] - 3}>{node[0]}</text><text x={node[2]} y={node[3] + 13}>{node[1]}</text></g>)}</svg><div className="c4x-node-detail"><b>{selected}</b><p>Structured relationship details will be populated from the analysis response.</p></div></div>
 }
 
-function AssessmentView({ complete, title, disputeType, evidenceCount }: { complete: boolean; title: string; disputeType: string; evidenceCount: number }) {
+function AssessmentView({ complete, title, disputeType, evidenceCount, assessment }: { complete: boolean; title: string; disputeType: string; evidenceCount: number; assessment: AssessmentResponse | null }) {
   if (!complete) return <div className="c4x-empty"><ShieldCheck size={30} /><h2>Neutral assessment pending</h2><p>The report appears after the debate, verification, and audit stages are complete.</p></div>
+  if (assessment) return <LiveAssessmentView assessment={assessment} />
   return <div className="c4x-assessment"><div className="c4x-assessment-banner"><ShieldCheck size={19} /><div><b>Mixed or uncertain</b><small>Demo assessment · not a prediction</small></div></div><dl><div><dt>Case title</dt><dd>{title}</dd></div><div><dt>Dispute type</dt><dd>{disputeType}</dd></div><div><dt>Assessment status</dt><dd>Completed for review</dd></div></dl><section><h3>Neutral Auditor Conclusion</h3><p>The available record contains arguable positions on payment and repairs. The evidence should be authenticated and reviewed by a qualified professional before any real-world decision.</p></section><section><h3>Evidence Gaps</h3><p>{evidenceCount ? `${evidenceCount} uploaded evidence file(s) are available for review.` : 'Payment records, lease terms, and authenticated messages remain to be supplied.'}</p></section><section><h3>Legal Source Verification</h3><p>No legal source is marked verified in demo mode. Real verification must come from the backend.</p></section><div className="c4x-report-actions"><button onClick={() => window.print()}>Print Report</button><button disabled>Download PDF</button><button disabled>Save Assessment</button></div><p className="c4x-legal-disclaimer">This AI-generated case assessment is intended for informational and educational purposes only. It is not legal advice and does not predict the outcome of a court proceeding. Consult a qualified Sri Lankan legal professional for advice about your situation.</p></div>
+}
+
+function LiveAssessmentView({ assessment }: { assessment: AssessmentResponse }) {
+  const list = (items: string[]) => items.length ? <ul>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul> : <p>None reported.</p>
+  return <div className="c4x-assessment">
+    <div className="c4x-assessment-banner"><ShieldCheck size={19} /><div><b>Live C4 assessment: {assessment.evidence_sufficiency}</b><small>Retrieved evidence and local Qwen3 analysis</small></div></div>
+    <section><h3>Neutral Auditor Conclusion</h3><p>{assessment.neutral_case_assessment.assessment || 'No neutral assessment was returned.'}</p></section>
+    <section><h3>Plaintiff Arguments</h3>{assessment.plaintiff_arguments.arguments.length ? assessment.plaintiff_arguments.arguments.map((argument, index) => <article key={`${argument.claim}-${index}`}><p><b>{argument.claim}</b></p><small>Sources: {argument.evidence_source_ids.join(', ') || 'None verified'}</small>{list(argument.missing_evidence)}</article>) : <p>No structured Plaintiff arguments were returned.</p>}</section>
+    <section><h3>Defense Counterarguments</h3>{assessment.defense_counterarguments.counterarguments.length ? assessment.defense_counterarguments.counterarguments.map((argument, index) => <article key={`${argument.challenged_claim}-${index}`}><p><b>{argument.counterargument}</b></p><small>Challenges: {argument.challenged_claim} · Sources: {argument.evidence_source_ids.join(', ') || 'None verified'}</small>{list(argument.missing_evidence)}</article>) : <p>No structured Defense arguments were returned.</p>}</section>
+    <section><h3>Strengths and Weaknesses</h3><b>Strengths</b>{list(assessment.strengths)}<b>Weaknesses</b>{list(assessment.weaknesses)}</section>
+    <section><h3>Missing Evidence</h3>{list(assessment.missing_evidence)}</section>
+    <section><h3>Verified Court References</h3>{assessment.verified_court_case_references.length ? <ul>{assessment.verified_court_case_references.map(source => <li key={source.source_id}>{source.source_id}: {source.case_number}, pages {source.start_page ?? '?'}–{source.end_page ?? '?'}{source.similarity_score == null ? '' : ` · similarity ${source.similarity_score.toFixed(3)}`}</li>)}</ul> : <p>No court references were retrieved.</p>}</section>
+    {assessment.unsupported_claim_warnings.length > 0 && <section><h3>Unsupported-Claim Warnings</h3>{list(assessment.unsupported_claim_warnings)}</section>}
+    {assessment.uploaded_document_references && assessment.uploaded_document_references.length > 0 && <section><h3>Uploaded Document Evidence</h3><ul>{assessment.uploaded_document_references.map(source => <li key={source.source_id}>{source.source_id}: {source.sanitized_filename}, {source.section_label}{source.warning ? ` · ${source.warning}` : ''}</li>)}</ul></section>}
+    {assessment.document_context_warnings && assessment.document_context_warnings.length > 0 && <section><h3>Document Context Warnings</h3>{list(assessment.document_context_warnings)}</section>}
+    {assessment.execution_errors.length > 0 && <section><h3>Execution Warnings</h3>{list(assessment.execution_errors)}</section>}
+    <p className="c4x-legal-disclaimer">{assessment.disclaimer}</p>
+  </div>
 }
 
 export default C4ArgumentationEngine
