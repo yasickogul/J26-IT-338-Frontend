@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Info, Scale, Sparkles } from 'lucide-react'
 import {
-  C1ApiError,
   fetchC1SimilarCasesForIntake,
   getC1Intake,
+  isC1ApiError,
   loadStoredC1Result,
   storeC1Result,
   type C1ExtractedLegalInfo,
@@ -86,9 +86,11 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
         if (cancelled) return
         if (!cached || cached.intake_id !== intakeId) {
           setError(
-            err instanceof C1ApiError
+            isC1ApiError(err)
               ? err.message
-              : 'Could not load the saved intake result from the backend.',
+              : err instanceof Error
+                ? err.message
+                : 'Could not load the saved intake result from the backend.',
           )
         }
       } finally {
@@ -115,11 +117,18 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
       setRetrieval(response)
     } catch (err) {
       setRetrieval(null)
-      setRetrievalError(
-        err instanceof C1ApiError
+      const detail = isC1ApiError(err)
+        ? err.message
+        : err instanceof Error
           ? err.message
-          : 'Similar-case retrieval failed. Your intake extraction is unchanged.',
+          : 'Unknown retrieval error'
+      const code = isC1ApiError(err) && err.code ? ` [${err.code}]` : ''
+      setRetrievalError(
+        `Similar-case retrieval failed${code}. ${detail} Your intake extraction is unchanged.`,
       )
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('C1 similar-cases failed', err)
+      }
     } finally {
       setRetrieving(false)
     }

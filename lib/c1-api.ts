@@ -130,7 +130,22 @@ export class C1ApiError extends Error {
   }
 }
 
+/** Duck-typed check — Turbopack HMR can break `instanceof` across reloaded modules. */
+export function isC1ApiError(error: unknown): error is C1ApiError {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { name?: unknown; message?: unknown; status?: unknown }
+  return candidate.name === 'C1ApiError' && typeof candidate.message === 'string'
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { name?: unknown }
+  return candidate.name === 'AbortError'
+}
+
 const DEFAULT_TIMEOUT_MS = 60_000
+/** Cold MiniLM load + Neon search can exceed 60s on first request. */
+export const C1_SIMILAR_CASES_TIMEOUT_MS = 180_000
 
 export function getC1ApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim()
@@ -204,12 +219,16 @@ async function requestJson<T>(
     }
     return payload as T
   } catch (error) {
-    if (error instanceof C1ApiError) throw error
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new C1ApiError('The case analysis service timed out. Please try again.', 408, 'TIMEOUT')
+    if (isC1ApiError(error)) throw error
+    if (isAbortError(error)) {
+      throw new C1ApiError(
+        'The case analysis service timed out while searching judgments. Please try again.',
+        408,
+        'TIMEOUT',
+      )
     }
     throw new C1ApiError(
-      'Could not reach the case analysis service. Check that the backend is running and reachable.',
+      'Could not reach the case analysis service. Check that the backend is running on the configured API URL.',
       0,
       'NETWORK_ERROR',
       error,
@@ -314,16 +333,20 @@ export async function fetchC1SimilarCasesForIntake(
   intakeId: string,
   options?: { top_k?: number; include_analysis?: boolean; use_llm?: boolean },
 ): Promise<C1IntakeSimilarCasesResponse> {
-  return requestJson(`/intake/${encodeURIComponent(intakeId)}/similar-cases`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      top_k: options?.top_k ?? 5,
-      include_analysis: options?.include_analysis ?? true,
-      use_llm: options?.use_llm ?? false,
-      filter_civil: true,
-    }),
-  }, 120_000)
+  return requestJson(
+    `/intake/${encodeURIComponent(intakeId)}/similar-cases`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        top_k: options?.top_k ?? 5,
+        include_analysis: options?.include_analysis ?? true,
+        use_llm: options?.use_llm ?? false,
+        filter_civil: true,
+      }),
+    },
+    C1_SIMILAR_CASES_TIMEOUT_MS,
+  )
 }
 
 export const C1_LAST_RESULT_KEY = 'lexlanka_c1_last_result'
