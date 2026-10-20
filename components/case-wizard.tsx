@@ -36,7 +36,12 @@ import {
   type DisputeCategoryId,
 } from '@/lib/dispute-categories'
 import {
-  SIMULATED_SUBMIT_FLAG,
+  C1ApiError,
+  createC1Intake,
+  createC1IntakeWithDocument,
+  storeC1Result,
+} from '@/lib/c1-api'
+import {
   clearCaseDraft,
   draftHasUnsavedContent,
   emptyCaseDraft,
@@ -45,12 +50,20 @@ import {
   resolveCaseTitle,
   saveCaseDraft,
   summarizeEvidence,
-  toC2IntakePayload,
+  toC1IntakeRequest,
   validateCaseIntake,
   type CaseDraft,
   type IntakeValidationError,
 } from '@/lib/case-draft'
+import { lawyerPaths } from '@/lib/nav'
 import { Badge } from './shared-ui'
+
+type PendingUpload = {
+  file: File
+  name: string
+  size: number
+  type: string
+}
 
 const STEPS = ['Case category', 'Basic information', 'Case facts', 'Evidence & factors', 'Review'] as const
 
@@ -87,6 +100,9 @@ export function CaseWizard() {
   const [savedFlash, setSavedFlash] = useState(false)
   const [formError, setFormError] = useState<IntakeValidationError | null>(null)
   const [acknowledgeError, setAcknowledgeError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
 
   useEffect(() => {
     const existing = loadCaseDraft()
@@ -101,7 +117,7 @@ export function CaseWizard() {
   const leave = useCallback(
     (force = false) => {
       if (!force && draftHasUnsavedContent(draft) && !confirmDiscard()) return
-      router.push('/civil-case-analysis')
+      router.push('/lawyer/civil-case-analysis')
     },
     [draft, router],
   )
@@ -153,23 +169,59 @@ export function CaseWizard() {
     update({ step })
   }
 
-  const runAnalysis = () => {
+  const runAnalysis = async () => {
+    if (submitting) return
     const problem = validateCaseIntake(draft)
     if (problem) {
       setAcknowledgeError(null)
+      setSubmitError(null)
       setFormError(problem)
       update({ step: problem.step })
       return
     }
     if (!draft.acknowledged) {
+      setSubmitError(null)
       setAcknowledgeError('Confirm that this is a research tool and not legal advice before continuing.')
       return
     }
-    const payload = toC2IntakePayload(draft)
-    console.info('C2 intake payload (prototype — not sent)', payload)
-    sessionStorage.setItem(SIMULATED_SUBMIT_FLAG, '1')
-    clearCaseDraft()
-    router.push('/civil-case-analysis')
+
+    const payload = toC1IntakeRequest(draft)
+    if (!payload) {
+      setSubmitError('Select a dispute category and enter a case description before continuing.')
+      return
+    }
+
+    setSubmitError(null)
+    setAcknowledgeError(null)
+    setSubmitting(true)
+    saveCaseDraft(draft)
+
+    try {
+      const pdfUpload = pendingUploads.find(
+        (item) =>
+          item.type.toLowerCase().includes('pdf') || item.name.toLowerCase().endsWith('.pdf'),
+      )
+      const result = pdfUpload
+        ? await createC1IntakeWithDocument(payload, pdfUpload.file)
+        : await createC1Intake(payload)
+
+      if (!result.intake_id) {
+        throw new C1ApiError('The backend did not return an intake identifier.', 502, 'INVALID_RESPONSE')
+      }
+
+      storeC1Result(result)
+      clearCaseDraft()
+      setPendingUploads([])
+      router.push(lawyerPaths.intakeResult(result.intake_id))
+    } catch (error) {
+      const message =
+        error instanceof C1ApiError
+          ? error.message
+          : 'Could not submit this case to the analysis service. Your draft has been kept.'
+      setSubmitError(message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (!hydrated) {
@@ -233,10 +285,12 @@ export function CaseWizard() {
           <FactsStep
             draft={draft}
             invalid={Boolean(visibleError)}
+            pendingUploads={pendingUploads}
             onChange={(patch) => {
               if (formError?.step === 3) setFormError(null)
               update(patch)
             }}
+            onUploadsChange={setPendingUploads}
           />
         )}
 
@@ -259,26 +313,32 @@ export function CaseWizard() {
         {draft.step === 5 && (
           <p className="prototype-caption">
             <Info size={14} />
-            Prototype only. Find Relevant Cases does not retrieve historical judgments or calculate a legal relevance
-            score.
+            Find Relevant Cases submits this intake to C1 for structured extraction. Similar historical judgment
+            retrieval and legal relevance scoring are not available yet.
+          </p>
+        )}
+
+        {submitError && (
+          <p className="field-error" role="alert">
+            {submitError}
           </p>
         )}
 
         <div className="wizard-actions">
-          <button type="button" className="button ghost" onClick={goBack}>
+          <button type="button" className="button ghost" onClick={goBack} disabled={submitting}>
             {draft.step === 1 ? 'Cancel' : 'Back'}
           </button>
           <div>
-            <button type="button" className="button secondary" onClick={saveDraft}>
+            <button type="button" className="button secondary" onClick={saveDraft} disabled={submitting}>
               {savedFlash ? 'Draft saved' : 'Save draft'}
             </button>
             {draft.step < 5 ? (
-              <button type="button" className="button primary" onClick={goNext}>
+              <button type="button" className="button primary" onClick={goNext} disabled={submitting}>
                 Continue <ArrowRight size={15} />
               </button>
             ) : (
-              <button type="button" className="button primary" onClick={runAnalysis}>
-                <Sparkles size={15} /> Find Relevant Cases
+              <button type="button" className="button primary" onClick={() => void runAnalysis()} disabled={submitting}>
+                <Sparkles size={15} /> {submitting ? 'Submitting case…' : 'Find Relevant Cases'}
               </button>
             )}
           </div>
@@ -286,8 +346,8 @@ export function CaseWizard() {
       </div>
 
       <p className="footer-disclaimer">
-        <Info size={14} /> Your information remains local in this prototype. Do not upload confidential personal
-        information without permission.
+        <Info size={14} /> Drafts stay in this browser. Submitted intake is sent to the LexLanka C1 API. Do not upload
+        confidential personal information without permission.
       </p>
     </div>
   )
@@ -510,11 +570,15 @@ function BasicInfoStep({ draft, onChange }: { draft: CaseDraft; onChange: (patch
 function FactsStep({
   draft,
   invalid,
+  pendingUploads,
   onChange,
+  onUploadsChange,
 }: {
   draft: CaseDraft
   invalid: boolean
+  pendingUploads: PendingUpload[]
   onChange: (patch: Partial<CaseDraft>) => void
+  onUploadsChange: (uploads: PendingUpload[]) => void
 }) {
   return (
     <>
@@ -561,24 +625,28 @@ function FactsStep({
         </FormLabel>
       </div>
       <DocumentPicker
-        documents={draft.supportingDocuments}
-        onAdd={(supportingDocuments) => onChange({ supportingDocuments })}
-        onRemove={(index) =>
-          onChange({ supportingDocuments: draft.supportingDocuments.filter((_, i) => i !== index) })
-        }
+        uploads={pendingUploads}
+        onChange={(next) => {
+          onUploadsChange(next)
+          onChange({
+            supportingDocuments: next.map((item) => ({
+              name: item.name,
+              size: item.size,
+              type: item.type,
+            })),
+          })
+        }}
       />
     </>
   )
 }
 
 function DocumentPicker({
-  documents,
-  onAdd,
-  onRemove,
+  uploads,
+  onChange,
 }: {
-  documents: CaseDraft['supportingDocuments']
-  onAdd: (documents: CaseDraft['supportingDocuments']) => void
-  onRemove: (index: number) => void
+  uploads: PendingUpload[]
+  onChange: (uploads: PendingUpload[]) => void
 }) {
   return (
     <div className="document-picker">
@@ -586,7 +654,7 @@ function DocumentPicker({
         <Upload size={19} />
         <span>
           <b>Upload supporting documents</b>
-          <small>PDF, DOCX, JPG or PNG · prototype only</small>
+          <small>PDF preferred for backend processing · optional</small>
         </span>
         <input
           className="file-input"
@@ -596,25 +664,34 @@ function DocumentPicker({
           onChange={(e) => {
             const files = Array.from(e.target.files ?? [])
             if (!files.length) return
-            onAdd([
-              ...documents,
-              ...files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+            onChange([
+              ...uploads,
+              ...files.map((file) => ({
+                file,
+                name: file.name,
+                size: file.size,
+                type: file.type,
+              })),
             ])
             e.target.value = ''
           }}
         />
       </label>
       <p className="field-hint document-note">
-        Prototype only. File contents are not uploaded, analyzed, or stored. Saving a draft keeps the file name in this
-        browser only.
+        Optional. If you attach a PDF, it is sent with the intake to C1. Draft saves keep only file names in this
+        browser; file contents stay in memory until you submit or leave this page.
       </p>
-      {documents.length > 0 && (
+      {uploads.length > 0 && (
         <ul className="doc-list">
-          {documents.map((file, index) => (
+          {uploads.map((file, index) => (
             <li key={`${file.name}-${file.size}-${index}`}>
               <FileText size={15} />
               <span>{file.name}</span>
-              <button type="button" className="text-button" onClick={() => onRemove(index)}>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onChange(uploads.filter((_, i) => i !== index))}
+              >
                 Remove
               </button>
             </li>

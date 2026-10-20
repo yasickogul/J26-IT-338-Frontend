@@ -1,10 +1,44 @@
 /**
  * Browser tests with local prototype auth (localStorage role).
- * The wizard does not call the FastAPI backend yet (simulated submit only).
- * These are not full-stack integration tests.
+ * Submit success/failure against C1 is mocked unless a live backend is intentionally targeted.
  */
 import { test, expect, loginAsLawyer } from './fixtures/auth'
 import { CASE_DRAFT_STORAGE_KEY } from '../lib/case-draft'
+
+const MOCK_INTAKE_ID = '11111111-1111-1111-1111-111111111111'
+
+function mockExtractedResult() {
+  return {
+    intake_id: MOCK_INTAKE_ID,
+    status: 'done',
+    case_information: {
+      case_type: 'Employment',
+      dispute_category: 'employment',
+      title: 'Employee v. Employer',
+      summary:
+        'The employee was dismissed without statutory notice after asking about unpaid overtime wages.',
+      remedy_requested: null,
+    },
+    parties_and_positions: [],
+    legal_issues: [],
+    claims: [],
+    evidence_mentioned: [],
+    cited_case_references: [],
+    entities: [],
+    structured_legal_info: {
+      claims: [],
+      parties: [],
+      evidence: [],
+      entities: [],
+    },
+    source_text_chars: 120,
+    model_version: 'stage2-rules-v1',
+    disclaimer: 'This is informational and not legal advice.',
+    similar_cases_available: false,
+    legal_relevance_score_available: false,
+    llm_explanation_available: false,
+  }
+}
 
 const REQUIRED_CATEGORIES = [
   'Contract dispute',
@@ -15,7 +49,7 @@ const REQUIRED_CATEGORIES = [
 
 async function openWizard(page: import('@playwright/test').Page) {
   await loginAsLawyer(page)
-  await page.goto('/civil-case-analysis/new')
+  await page.goto('/lawyer/civil-case-analysis/new')
   await expect(page.getByRole('heading', { name: 'Civil Case Analysis' })).toBeVisible()
   await expect(page.getByText('STEP 1 OF 5')).toBeVisible()
 }
@@ -74,7 +108,7 @@ test.describe('Civil case analysis wizard', () => {
     await page.locator('#case-description').fill(
       'The parties signed a written supply agreement and the buyer failed to pay invoices for delivered goods.',
     )
-    await page.getByRole('button', { name: 'Back' }).click()
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
     await expect(page.getByText('STEP 2 OF 5')).toBeVisible()
     await expect(titleInput).toHaveValue('Silva v. Fernando Traders')
 
@@ -96,7 +130,9 @@ test.describe('Civil case analysis wizard', () => {
     await expect(page.getByRole('button', { name: 'Draft saved' })).toBeVisible()
 
     await page.goto('/civil-case-analysis')
+    await expect(page).toHaveURL(/\/lawyer\/civil-case-analysis$/)
     await page.goto('/civil-case-analysis/new')
+    await expect(page).toHaveURL(/\/lawyer\/civil-case-analysis\/new$/)
     // Draft restores the saved step (facts), so assert description + localStorage category.
     await expect(page.getByText('STEP 3 OF 5')).toBeVisible()
     await expect(page.locator('#case-description')).toHaveValue(/written tenancy early/)
@@ -105,7 +141,27 @@ test.describe('Civil case analysis wizard', () => {
     expect(stored!).toContain('"category":"rental"')
   })
 
-  test('successful simulated submit shows the prototype notice', async ({ page }) => {
+  test('successful C1 intake submit opens the extraction result page', async ({ page }) => {
+    await page.route('**/api/v1/c1/intake', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockExtractedResult()),
+      })
+    })
+    await page.route(`**/api/v1/c1/intake/${MOCK_INTAKE_ID}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intake_id: MOCK_INTAKE_ID,
+          status: 'done',
+          result: mockExtractedResult(),
+          error: null,
+        }),
+      })
+    })
+
     await openWizard(page)
     await page.getByRole('radio', { name: /Employment dispute/i }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
@@ -113,24 +169,45 @@ test.describe('Civil case analysis wizard', () => {
     await page.locator('#case-description').fill(
       'The employee was dismissed without statutory notice after asking about unpaid overtime wages.',
     )
-    // Skip evidence step optional fields; advance to review.
     await page.getByRole('button', { name: 'Continue' }).click()
     await expect(page.getByText('STEP 4 OF 5')).toBeVisible()
     await page.getByRole('button', { name: 'Continue' }).click()
     await expect(page.getByText('STEP 5 OF 5')).toBeVisible()
 
     await page.getByRole('button', { name: /Find Relevant Cases/i }).click()
-    await expect(page).toHaveURL(/\/civil-case-analysis$/)
-    await expect(page.getByRole('status')).toContainText(/Prototype only/i)
-    await expect(page.getByRole('status')).toContainText(/Nothing was sent to a server/i)
+    await expect(page).toHaveURL(new RegExp(`/lawyer/civil-case-analysis/${MOCK_INTAKE_ID}$`))
+    await expect(page.getByRole('status')).toContainText(/Intake saved/i)
+    await expect(page.getByRole('heading', { name: 'Semantic retrieval', exact: true })).toBeVisible()
+    await expect(page.getByText(/Not implemented yet/i).first()).toBeVisible()
   })
 
-  test('API failure UI is not implemented for the wizard yet', async ({ page }) => {
-    test.info().annotations.push({
-      type: 'missing-feature',
-      description:
-        'Wizard submit is local/simulated (submitted_to_backend: false). There is no backend fetch or API error state to assert.',
+  test('API failure keeps the draft and shows an error', async ({ page }) => {
+    await page.route('**/api/v1/c1/intake', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Simulated backend failure' }),
+      })
     })
-    test.skip(true, 'No wizard API error state exists yet — report only, do not invent UI.')
+
+    await openWizard(page)
+    await page.getByRole('radio', { name: /Contract dispute/i }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.locator('#case-description').fill(
+      'A supplier delivered construction materials under a written agreement and the customer failed to pay.',
+    )
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('STEP 5 OF 5')).toBeVisible()
+
+    await page.getByRole('button', { name: /Find Relevant Cases/i }).click()
+    await expect(page.locator('p.field-error[role="alert"]')).toContainText(
+      /Simulated backend failure|could not process/i,
+    )
+    await expect(page).toHaveURL(/\/lawyer\/civil-case-analysis\/new$/)
+    const stored = await page.evaluate((key) => window.localStorage.getItem(key), CASE_DRAFT_STORAGE_KEY)
+    expect(stored).toBeTruthy()
+    expect(stored!).toContain('"category":"contract"')
   })
 })

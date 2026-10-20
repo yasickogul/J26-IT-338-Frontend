@@ -1,3 +1,4 @@
+import type { C1CaseIntakeRequest, C1EvidenceFactorItem } from './c1-api'
 import {
   caseStageLabel,
   categoryShowsDisputeAmount,
@@ -18,7 +19,9 @@ import {
 } from './dispute-categories'
 
 export const CASE_DRAFT_STORAGE_KEY = 'lexlanka_case_draft_v1'
+/** @deprecated Simulated submit is replaced by real C1 intake; kept for one release of cleanup. */
 export const SIMULATED_SUBMIT_FLAG = 'lexlanka_c2_simulated_submit'
+export const C1_INTAKE_SUBMITTED_FLAG = 'lexlanka_c1_intake_submitted'
 
 export type EvidenceEntry = {
   status: EvidenceStatus | null
@@ -375,5 +378,59 @@ export function toC2IntakePayload(draft: CaseDraft): C2IntakePayload | null {
     }),
     supporting_documents: draft.supportingDocuments,
     research_disclaimer_accepted: draft.acknowledged,
+  }
+}
+
+function evidenceItemsForApi(draft: CaseDraft): C1EvidenceFactorItem[] {
+  return evidenceItemsFor(draft.category).flatMap((item) => {
+    const entry = draft.evidence[item.id]
+    const availability: EvidenceAvailability = entry?.status ?? 'not_provided'
+    if (availability === 'not_provided') return []
+    return [
+      {
+        id: item.id,
+        label: item.label,
+        availability,
+        description: availability === 'available' ? orNull(entry?.description ?? '') : null,
+      },
+    ]
+  })
+}
+
+/**
+ * Map the Lawyer wizard draft to the C1 `CaseIntakeRequest` schema.
+ * Optional PDF bytes are sent separately via `/intake/document`.
+ */
+export function toC1IntakeRequest(draft: CaseDraft): C1CaseIntakeRequest | null {
+  if (!draft.category || draft.needsCategoryReselect) return null
+  const category = toApiCategoryPayload(draft.category)
+  const resolved = resolveCaseTitle(draft)
+  const stage = normalizeCaseStage(draft.caseStage)
+  const showAmount = categoryShowsDisputeAmount(draft.category)
+  const evidenceItems = evidenceItemsForApi(draft)
+  const documentNotes = draft.supportingDocuments.map(
+    (doc) => `Supporting document selected in wizard: ${doc.name} (${doc.type || 'unknown type'})`,
+  )
+
+  return {
+    dispute_category: category.dispute_category,
+    title: resolved.title,
+    plaintiff: orNull(draft.plaintiff),
+    defendant: orNull(draft.defendant),
+    court_type: orNull(draft.courtType),
+    province: orNull(draft.province),
+    district: orNull(draft.district),
+    amount_lkr: showAmount ? orNull(draft.amountLkr) : null,
+    relevant_dates: orNull(draft.relevantDates),
+    case_stage: stage || null,
+    case_stage_label: caseStageLabel(stage),
+    subcategory: isSubcategoryId(draft.category, draft.subcategory) ? draft.subcategory : null,
+    subcategory_label: getSubcategoryLabel(draft.category, draft.subcategory, draft.otherCategoryDescription),
+    other_category_description: draft.category === 'other_civil' ? orNull(draft.otherCategoryDescription) : null,
+    description: draft.description.trim(),
+    legal_issue: orNull(draft.legalIssue),
+    remedy: orNull(draft.remedy),
+    evidence_items: evidenceItems,
+    text: documentNotes.length ? documentNotes.join('\n') : null,
   }
 }

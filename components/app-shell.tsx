@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
-import { canAccessPath, crumbLabelForPath, isNavActive, navForRole } from '@/lib/nav'
+import { canAccessPath, crumbLabelForPath, homePathForRole, isNavActive, lawyerPaths, navForRole } from '@/lib/nav'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { role, ready, logout } = useAuth()
@@ -27,6 +27,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [query, setQuery] = useState('')
   const [language, setLanguage] = useState('English')
 
+  const allowed = role ? canAccessPath(role, pathname) : false
+
   useEffect(() => {
     if (!ready) return
     if (!role) {
@@ -34,18 +36,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return
     }
     if (!canAccessPath(role, pathname)) {
-      router.replace('/overview')
+      const home = homePathForRole(role)
+      if (pathname !== home) router.replace(home)
     }
   }, [ready, role, pathname, router])
 
   const visibleNav = useMemo(() => (role ? navForRole(role) : []), [role])
   const crumb = crumbLabelForPath(pathname)
-  const lawyerOverview = role === 'lawyer' && pathname.startsWith('/overview')
+  const lawyerOverview = role === 'lawyer' && pathname === lawyerPaths.overview
 
-  if (!ready || !role) {
+  if (!ready || !role || !allowed) {
     return (
       <div className="lex-app" style={{ placeItems: 'center', display: 'grid', minHeight: '100vh' }}>
-        <p className="muted">Loading workspace…</p>
+        <p className="muted">{ready && role ? 'Redirecting…' : 'Loading workspace…'}</p>
       </div>
     )
   }

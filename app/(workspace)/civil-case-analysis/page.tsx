@@ -1,15 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { CivilCaseAnalysisScreen } from '@/components/civil-case-analysis-screen'
-import { JudgmentDrawer } from '@/components/judgment-drawer'
+import { LegacyLawyerRedirect } from '@/components/legacy-lawyer-redirect'
+import { lawyerPaths } from '@/lib/nav'
 
-export default function CivilCaseAnalysisPage() {
-  const [drawer, setDrawer] = useState<string | null>(null)
-  return (
-    <>
-      <CivilCaseAnalysisScreen onOpenJudgment={setDrawer} />
-      {drawer && <JudgmentDrawer title={drawer} onClose={() => setDrawer(null)} />}
-    </>
-  )
+export default function LegacyCivilCaseAnalysisPage() {
+  return <LegacyLawyerRedirect href={lawyerPaths.civilCaseAnalysis} />
 }
