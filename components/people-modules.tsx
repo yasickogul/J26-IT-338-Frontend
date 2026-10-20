@@ -232,7 +232,6 @@ export function MisinformationScreen() {
   const [analyzing, setAnalyzing] = useState(false)
   const [done, setDone] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState('')
   const [scenario, setScenario] = useState('Mostly Supported')
   const [expanded, setExpanded] = useState(false)
   const outcomes: Record<string, string> = {
@@ -255,7 +254,6 @@ export function MisinformationScreen() {
     const f = e.target.files?.[0]
     if (!f) return
     setFile(f)
-    setPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : '')
   }
   const sample = claim || "An employer can deduct any amount from an employee's salary without written consent."
 
@@ -316,7 +314,7 @@ export function MisinformationScreen() {
         )}
         {file && (
           <div className="uploaded-file">
-            {preview ? <img src={preview} alt="Uploaded legal claim preview" /> : <FileText size={25} />}
+            <FileText size={25} />
             <span>
               <b>{file.name}</b>
               <small>{(file.size / 1024 / 1024).toFixed(1)} MB · Ready for analysis</small>
@@ -327,7 +325,6 @@ export function MisinformationScreen() {
               aria-label="Remove uploaded file"
               onClick={() => {
                 setFile(null)
-                setPreview('')
               }}
             >
               <X size={16} />
@@ -529,7 +526,7 @@ export function AnalysisHistoryScreen() {
         {[
           ['Perera v. Silva', 'Civil Case Analysis'],
           ['Employment Agreement', 'Document Analysis'],
-          ['Rent increase without notice', 'Settlement Simulator'],
+          ['Rent increase without notice', 'Multi-Agent Legal Argumentation Engine'],
           ['Overtime claim check', 'Misinformation Analysis'],
         ].map(([title, type]) => (
           <div className="history-row" key={title}>

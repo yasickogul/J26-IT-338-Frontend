@@ -21,7 +21,7 @@ import { Badge, MiniChart, SectionTitle, Stat } from './shared-ui'
 const activity = [
   ['Perera v. Silva', 'Civil Case Analysis', '12 min ago', Scale, 'teal'],
   ['Employment Agreement', 'Document Analysis', 'Yesterday', FileText, 'gold'],
-  ['Can a landlord increase rent without notice?', 'Multi-Agent Deliberation & Settlement Simulator', '2 days ago', CircleHelp, 'blue'],
+  ['Can a landlord increase rent without notice?', 'Multi-Agent Legal Argumentation Engine', '2 days ago', CircleHelp, 'blue'],
   ['Employees can never claim overtime...', 'Misinformation Analysis', '3 days ago', ShieldCheck, 'rose'],
 ] as const
 
@@ -49,7 +49,7 @@ export function OverviewScreen({ onOpenJudgment }: { onOpenJudgment?: (title: st
             badge: 'Document review',
           },
           {
-            title: 'Multi-Agent Deliberation & Settlement Simulator',
+            title: 'Multi-Agent Legal Argumentation Engine',
             desc: 'Compare plaintiff, defense, auditor, and settlement perspectives for a civil dispute.',
             Icon: CircleHelp,
             href: '/settlement-simulator',

@@ -177,7 +177,7 @@ test.describe('Civil case analysis wizard', () => {
     await page.getByRole('button', { name: /Find Relevant Cases/i }).click()
     await expect(page).toHaveURL(new RegExp(`/lawyer/civil-case-analysis/${MOCK_INTAKE_ID}$`))
     await expect(page.getByRole('status')).toContainText(/Intake saved/i)
-    await expect(page.getByRole('status')).toContainText(/Similar-case retrieval/i)
+    await expect(page.getByRole('heading', { name: 'Semantic retrieval' })).toBeVisible()
     await expect(page.getByText(/Not implemented yet/i).first()).toBeVisible()
   })
 
