@@ -252,6 +252,80 @@ export async function getC1Intake(intakeId: string): Promise<C1IntakeStatusRespo
   })
 }
 
+export type C1SimilarJudgmentMatch = {
+  document_id: string
+  title: string
+  citation?: string | null
+  court?: string | null
+  decision_date?: string | null
+  source_url?: string | null
+  source_type?: string
+  case_type?: string | null
+  chunk_id: string
+  chunk_index: number
+  section?: string | null
+  supporting_excerpt: string
+  retrieval_similarity: number
+  score_label: string
+}
+
+export type C1CaseAnalysisSection = {
+  title: string
+  content: string
+  source_document_ids: string[]
+}
+
+export type C1GroundedCaseAnalysis = {
+  case_summary: string
+  similar_historical_cases: C1CaseAnalysisSection[]
+  legal_issues: string[]
+  applicable_legal_principles: C1CaseAnalysisSection[]
+  arguments_for_applicant: string[]
+  arguments_for_respondent: string[]
+  evidence_gaps: string[]
+  limitations: string[]
+  llm_used: boolean
+  llm_status: string
+  model_version: string
+}
+
+export type C1IntakeSimilarCasesResponse = {
+  intake_id: string
+  query: string
+  retrieved_count: number
+  cases: C1SimilarJudgmentMatch[]
+  analysis?: C1GroundedCaseAnalysis | null
+  retrieval_method: string
+  score_explanation: string
+  disclaimer: string
+}
+
+export type C1SimilarCasesResponse = {
+  query: string
+  retrieved_count: number
+  cases: C1SimilarJudgmentMatch[]
+  retrieval_method: string
+  score_explanation: string
+  disclaimer: string
+  intake_id?: string | null
+}
+
+export async function fetchC1SimilarCasesForIntake(
+  intakeId: string,
+  options?: { top_k?: number; include_analysis?: boolean; use_llm?: boolean },
+): Promise<C1IntakeSimilarCasesResponse> {
+  return requestJson(`/intake/${encodeURIComponent(intakeId)}/similar-cases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      top_k: options?.top_k ?? 5,
+      include_analysis: options?.include_analysis ?? true,
+      use_llm: options?.use_llm ?? false,
+      filter_civil: true,
+    }),
+  }, 120_000)
+}
+
 export const C1_LAST_RESULT_KEY = 'lexlanka_c1_last_result'
 
 export function storeC1Result(result: C1ExtractedLegalInfo): void {
