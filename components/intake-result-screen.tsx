@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Info, Scale } from 'lucide-react'
+import { ArrowLeft, Info, Scale, Sparkles } from 'lucide-react'
 import {
   C1ApiError,
+  fetchC1SimilarCasesForIntake,
   getC1Intake,
   loadStoredC1Result,
   storeC1Result,
   type C1ExtractedLegalInfo,
+  type C1IntakeSimilarCasesResponse,
 } from '@/lib/c1-api'
 import { lawyerPaths } from '@/lib/nav'
 import { Badge, SectionTitle } from './shared-ui'
@@ -46,6 +48,9 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
   const [result, setResult] = useState<C1ExtractedLegalInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [retrieval, setRetrieval] = useState<C1IntakeSimilarCasesResponse | null>(null)
+  const [retrievalError, setRetrievalError] = useState<string | null>(null)
+  const [retrieving, setRetrieving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -97,6 +102,29 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
     }
   }, [intakeId])
 
+  const runSimilarCases = async () => {
+    if (retrieving) return
+    setRetrieving(true)
+    setRetrievalError(null)
+    try {
+      const response = await fetchC1SimilarCasesForIntake(intakeId, {
+        top_k: 5,
+        include_analysis: true,
+        use_llm: false,
+      })
+      setRetrieval(response)
+    } catch (err) {
+      setRetrieval(null)
+      setRetrievalError(
+        err instanceof C1ApiError
+          ? err.message
+          : 'Similar-case retrieval failed. Your intake extraction is unchanged.',
+      )
+    } finally {
+      setRetrieving(false)
+    }
+  }
+
   if (loading && !result) {
     return <p className="muted">Loading intake result…</p>
   }
@@ -126,13 +154,14 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
 
   const info = result.case_information
   const parties = result.parties_and_positions.map((party) => `${party.party} (${party.role})`)
+  const analysis = retrieval?.analysis
 
   return (
     <>
       <SectionTitle
-        eyebrow="STAGE 2 EXTRACTION"
+        eyebrow="CIVIL CASE ANALYSIS"
         title={info.title || 'Case intake result'}
-        description="Structured legal information extracted from your current-case intake. Similar historical judgments are not retrieved yet."
+        description="Stage 2 extraction is complete. Run semantic retrieval to find similar historical judgments in the Neon corpus."
         action={
           <Link className="button secondary" href={lawyerPaths.civilCaseAnalysis}>
             <ArrowLeft size={15} /> Back to module
@@ -143,8 +172,8 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
       <div className="notice" role="status">
         <Info size={17} />
         <span>
-          <b>Intake saved.</b> Extraction completed through C1 Stage 2. Similar-case retrieval, legal relevance scoring,
-          evidence-gap analysis, and LM Studio explanations are not connected yet.
+          <b>Intake saved.</b> Structured extraction completed. Similarity scores are retrieval cosine similarity only —
+          not a legal success probability.
         </span>
       </div>
 
@@ -182,31 +211,34 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">CAPABILITY STATUS</p>
-              <h2>What is available now</h2>
+              <p className="eyebrow">SIMILAR CASES</p>
+              <h2>Semantic retrieval</h2>
             </div>
           </div>
-          <div className="review-row">
-            <span>
-              <small>Similar historical cases</small>
-              <b>{result.similar_cases_available ? 'Available' : 'Not implemented yet'}</b>
-            </span>
-          </div>
-          <div className="review-row">
-            <span>
-              <small>Legal Precedent Relevance Score</small>
-              <b>{result.legal_relevance_score_available ? 'Available' : 'Not calculated'}</b>
-            </span>
-          </div>
-          <div className="review-row">
-            <span>
-              <small>LM Studio explanations</small>
-              <b>{result.llm_explanation_available ? 'Available' : 'Not connected'}</b>
-            </span>
-          </div>
-          <p className="muted small" style={{ marginTop: 12 }}>
-            {result.disclaimer}
+          <p className="muted">
+            Search the existing judgment corpus with the saved intake narrative. No fabricated judgments are shown.
           </p>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void runSimilarCases()}
+            disabled={retrieving}
+            style={{ marginTop: 14 }}
+          >
+            <Sparkles size={15} /> {retrieving ? 'Searching judgments…' : 'Find Similar Historical Cases'}
+          </button>
+          {retrievalError && (
+            <p className="field-error" role="alert" style={{ marginTop: 12 }}>
+              {retrievalError}
+            </p>
+          )}
+          {retrieval && (
+            <div style={{ marginTop: 14 }}>
+              <Field label="Retrieved judgments" value={String(retrieval.retrieved_count)} />
+              <Field label="Retrieval method" value={retrieval.retrieval_method} />
+              <p className="muted small">{retrieval.score_explanation}</p>
+            </div>
+          )}
         </section>
       </div>
 
@@ -216,21 +248,99 @@ export function IntakeResultScreen({ intakeId }: { intakeId: string }) {
       <ListBlock title="Evidence mentioned" items={result.evidence_mentioned} />
       <ListBlock title="Cited case references in narrative" items={result.cited_case_references} />
 
-      <section className="panel callout">
-        <div className="feature-icon teal">
-          <Scale size={19} />
+      {retrieving && (
+        <div className="notice" role="status">
+          <Info size={17} />
+          <span>Running semantic search against the Neon judgment corpus…</span>
         </div>
-        <div>
-          <h3>Historical case comparison is pending</h3>
-          <p className="muted">
-            The shared HybridRetriever is not implemented yet, so LexLanka does not invent judgments, relevance
-            percentages, or LLM explanations on this screen.
+      )}
+
+      {retrieval && retrieval.retrieved_count === 0 && (
+        <div className="notice" role="status">
+          <Info size={17} />
+          <span>No similar judgments were retrieved for this intake query.</span>
+        </div>
+      )}
+
+      {retrieval && retrieval.cases.length > 0 && (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">RETRIEVED JUDGMENTS</p>
+              <h2>Similar historical cases</h2>
+            </div>
+            <Badge tone="teal">{retrieval.retrieved_count} found</Badge>
+          </div>
+          {retrieval.cases.map((item) => (
+            <article className="table-row" key={item.document_id} style={{ alignItems: 'flex-start' }}>
+              <span>
+                <b>{item.citation || item.document_id}</b>
+                <small>{item.title}</small>
+                <small>
+                  {[item.court, item.decision_date].filter(Boolean).join(' · ') || 'Court / date unavailable'}
+                </small>
+                <small>{item.supporting_excerpt}</small>
+                {item.source_url ? (
+                  <a className="text-button" href={item.source_url} target="_blank" rel="noreferrer">
+                    Open source
+                  </a>
+                ) : null}
+              </span>
+              <Badge tone="slate">{(item.retrieval_similarity * 100).toFixed(1)}% similarity</Badge>
+            </article>
+          ))}
+        </section>
+      )}
+
+      {analysis && (
+        <>
+          <section className="panel">
+            <p className="eyebrow">GROUNDED ANALYSIS</p>
+            <h2>Case summary</h2>
+            <p>{analysis.case_summary}</p>
+          </section>
+          <ListBlock title="Legal issues" items={analysis.legal_issues} />
+          <ListBlock title="Applicant-side arguments" items={analysis.arguments_for_applicant} />
+          <ListBlock title="Respondent-side arguments" items={analysis.arguments_for_respondent} />
+          <ListBlock title="Evidence gaps" items={analysis.evidence_gaps} />
+          <ListBlock title="Limitations" items={analysis.limitations} />
+          {analysis.applicable_legal_principles.length > 0 && (
+            <section className="panel">
+              <p className="eyebrow">SOURCE-SUPPORTED EXCERPTS</p>
+              <h2>Applicable themes from retrieved judgments</h2>
+              {analysis.applicable_legal_principles.map((section) => (
+                <div className="review-row" key={`${section.title}-${section.content.slice(0, 24)}`}>
+                  <span>
+                    <small>{section.title}</small>
+                    <b>{section.content}</b>
+                  </span>
+                </div>
+              ))}
+            </section>
+          )}
+          <p className="muted small">
+            Analysis model: {analysis.model_version}. LM Studio: {analysis.llm_status}.
           </p>
-        </div>
-        <Link className="button secondary" href={lawyerPaths.newCivilCaseAnalysis}>
-          Analyze another case
-        </Link>
-      </section>
+        </>
+      )}
+
+      {!retrieval && (
+        <section className="panel callout">
+          <div className="feature-icon teal">
+            <Scale size={19} />
+          </div>
+          <div>
+            <h3>Ready for semantic retrieval</h3>
+            <p className="muted">
+              Use Find Similar Historical Cases to query the existing Neon embeddings. Hybrid keyword fusion and a
+              validated legal relevance percentage are not implemented yet.
+            </p>
+          </div>
+          <Link className="button secondary" href={lawyerPaths.newCivilCaseAnalysis}>
+            Analyze another case
+          </Link>
+        </section>
+      )}
     </>
   )
 }
