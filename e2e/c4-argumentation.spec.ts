@@ -12,8 +12,11 @@ const assessment = {
   verified_court_case_references: [{
     source_id: 'S1', case_number: 'CA/0788/1997(F)', start_page: 5, end_page: 8, similarity_score: 0.56,
   }],
+  uploaded_document_references: [{
+    source_id: 'D1', document_id: 'document-1', sanitized_filename: 'synthetic-land.pdf', section_label: 'page-1', section_text: 'Synthetic deed content.', extraction_status: 'extracted', warning: null,
+  }],
   plaintiff_arguments: {
-    arguments: [{ claim: 'Long-term possession may support the stated position.', evidence_source_ids: ['S1'], missing_evidence: ['Original deed'] }],
+    arguments: [{ claim: 'Long-term possession may support the stated position.', evidence_source_ids: ['D1'], evidence_support: ['D1 records the claimed possession period.'], missing_evidence: ['Original deed'] }],
     limitations: [],
   },
   defense_counterarguments: {
@@ -23,7 +26,7 @@ const assessment = {
   neutral_case_assessment: {
     assessment: 'The supplied evidence is insufficient to resolve ownership.',
     strengths: ['The dispute is identifiable.'], weaknesses: ['The deed has not been verified.'],
-    missing_evidence: ['Original deed'], unsupported_claim_warnings: [], evidence_sufficiency: 'insufficient',
+    missing_evidence: ['Original deed'], unsupported_claim_warnings: [], contradictory_claims: ['Possession period is disputed.'], verified_source_ids: ['S1'], evidence_sufficiency: 'insufficient',
   },
   citation_audits: {
     plaintiff: { valid_source_ids: ['S1'], invalid_source_ids: [], invalid_case_numbers: [] },
@@ -35,8 +38,10 @@ const assessment = {
 
 test('C4 live mode sends the backend contract and renders the assessment', async ({ page }) => {
   let requestBody: Record<string, unknown> | undefined
+  let assessmentCalls = 0
 
   await page.route('**/api/v1/c_argumentation/assess', async route => {
+    assessmentCalls += 1
     requestBody = route.request().postDataJSON()
     await new Promise(resolve => setTimeout(resolve, 200))
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(assessment) })
@@ -64,7 +69,42 @@ test('C4 live mode sends the backend contract and renders the assessment', async
   await expect(page.getByText('Possession alone does not establish the deed\'s validity.')).toBeVisible()
   await expect(page.getByText('CA/0788/1997(F)', { exact: false })).toBeVisible()
   await expect(page.getByText('Original deed')).toHaveCount(3)
+  await page.getByRole('tab', { name: 'Debate' }).click()
+  await expect(page.getByTestId('live-debate')).toContainText('Plaintiff Agent')
+  await expect(page.getByTestId('live-debate')).toContainText('Long-term possession may support the stated position.')
+  await expect(page.getByTestId('live-debate')).toContainText('Defense Agent')
+  await expect(page.getByTestId('live-debate')).toContainText('Possession alone does not establish the deed\'s validity.')
+  await expect(page.getByTestId('live-debate')).toContainText('Neutral Auditor')
+  await expect(page.getByTestId('live-debate')).toContainText('CA/0788/1997(F)')
+  await expect(page.getByTestId('live-debate')).toContainText('D1')
+  await expect(page.getByTestId('live-debate')).toContainText('unverified extracted text')
+  await expect(page.getByTestId('live-debate')).toContainText('Original deed')
+  await page.getByRole('tab', { name: 'Argument Graph' }).click()
+  await expect(page.getByTestId('live-graph')).toBeVisible()
+  await expect(page.getByTestId('graph-node-user-claim')).toBeVisible()
+  await expect(page.getByTestId('graph-node-plaintiff-0')).toContainText('Plaintiff argument')
+  await expect(page.getByTestId('graph-node-defense-0')).toContainText('Defense counterargument')
+  await expect(page.getByTestId('graph-node-auditor-findings')).toContainText('Neutral Auditor findings')
+  await expect(page.getByTestId('graph-node-S1')).toContainText('S1')
+  await expect(page.getByTestId('graph-node-D1')).toContainText('D1')
+  await expect(page.getByTestId('graph-node-D1')).toContainText('unverified')
+  await expect(page.getByTestId('graph-node-missing-0')).toContainText('Missing evidence')
+  await expect(page.getByTestId('graph-edge')).toHaveCount(3)
+  await expect.poll(() => assessmentCalls).toBe(1)
   await expect(submit).toBeEnabled()
+})
+
+test('C4 keeps Demo mode illustrative and shows a live empty state before assessment', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('lexlanka_role', 'people'))
+  await page.goto('/settlement-simulator')
+  await page.getByRole('tab', { name: 'Argument Graph' }).click()
+  await expect(page.getByText('Demo graph · select a node for details')).toHaveCount(0)
+  await expect(page.getByText('Argument graph is not ready')).toBeVisible()
+  await page.getByRole('button', { name: 'Live' }).click()
+  await expect(page.getByText('Live argument graph pending')).toBeVisible()
+  await page.getByRole('tab', { name: 'Debate' }).click()
+  await expect(page.getByText('Live debate pending')).toBeVisible()
+  await expect(page.getByText('Payment history is disputed')).toHaveCount(0)
 })
 
 test('C4 live mode shows an error without displaying a fake assessment', async ({ page }) => {

@@ -3,8 +3,14 @@ import baseConfig from '../playwright.config'
 export default {
   ...baseConfig,
   testDir: '.',
-  use: {
-    ...baseConfig.use,
-    launchOptions: { executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' },
-  },
+  projects: [
+    {
+      name: 'msedge',
+      use: {
+        ...baseConfig.use,
+        channel: 'msedge',
+        launchOptions: {},
+      },
+    },
+  ],
 }
